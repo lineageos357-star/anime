@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "anime": {
+    "endpoint": "https://api.allanime.day/api",
+    "headers": {
+      "Referer": "https://allanime.to",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0"
+    },
+    "queries": {
+      "search": "query($search: SearchInput $limit: Int $page: Int $translationType: VaildTranslationTypeEnumType $countryOrigin: VaildCountryOriginEnumType) { shows(search: $search limit: $limit page: $page translationType: $translationType countryOrigin: $countryOrigin) { edges { _id name thumbnail banner thumbnails availableEpisodes score type season description status genres broadcastInterval lastEpisodeDate lastEpisodeTimestamp nextAiringEpisode lastEpisodeInfo airedStart } } }",
+      "episodeList": "query($showId: String!) { show(_id: $showId) { _id availableEpisodesDetail } }",
+      "episodeSource": "query($showId: String!, $translationType: VaildTranslationTypeEnumType!, $episodeString: String!) { episode(showId: $showId translationType: $translationType episodeString: $episodeString) { episodeString sourceUrls } }",
+      "relatedShows": "query($showId: String!) { show(_id: $showId) { _id relatedShows } }"
+    }
+  },
+  "manga": {
+    "sourceApiBase": "https://comick-source-api.notaspider.dev",
+    "comickBase": "https://api.comick.io",
+    "comickFun": "https://api.comick.fun",
+    "imageBase": "https://meo.comick.pictures",
+    "mangaDexBase": "https://api.mangadex.org",
+    "headers": {
+      "source": {
+        "User-Agent": "Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 Chrome/124.0.0.0 Mobile Safari/537.36",
+        "Accept": "application/json",
+        "Content-Type": "application/json"
+      },
+      "comick": {
+        "User-Agent": "Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 Chrome/124.0.0.0 Mobile Safari/537.36",
+        "Accept": "application/json",
+        "Referer": "https://comick.io/",
+        "Origin": "https://comick.io"
+      },
+      "html": {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Referer": "https://comix.to/"
+      },
+      "mangaDex": {
+        "User-Agent": "AniKi/1.0 (manga-reader-app)",
+        "Accept": "application/json"
+      }
+    }
+  }
+}
