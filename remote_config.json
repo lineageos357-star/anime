@@ -18,6 +18,13 @@
     "headers": {
       "Content-Type": "application/json",
       "Referer": "https://allmanga.to/"
+    },
+    "queries": {
+      "search": "query($search: SearchInput, $limit: Int, $page: Int, $translationType: VaildTranslationTypeMangaEnumType, $countryOrigin: VaildCountryOriginEnumType) { mangas(search: $search, limit: $limit, page: $page, translationType: $translationType, countryOrigin: $countryOrigin) { edges { _id name thumbnail englishName countryOfOrigin genres } } }",
+      "popular": "query($type: VaildPopularTypeEnumType!, $size: Int!, $dateRange: Int!, $page: Int!, $allowAdult: Boolean!, $allowUnknown: Boolean!) { queryPopular(type: $type, size: $size, dateRange: $dateRange, page: $page, allowAdult: $allowAdult, allowUnknown: $allowUnknown) { recommendations { anyCard { _id name thumbnail englishName } } } }",
+      "details": "query ($id: String!) { manga(_id: $id) { _id name thumbnail description authors genres tags status altNames englishName countryOfOrigin } }",
+      "chapters": "query ($id: String!, $chapterNumStart: Float!, $chapterNumEnd: Float!) { episodeInfos(showId: $id, episodeNumStart: $chapterNumStart, episodeNumEnd: $chapterNumEnd) { episodeIdNum notes } }",
+      "chapterPages": "query ($id: String!, $translationType: VaildTranslationTypeMangaEnumType!, $chapterNum: String!) { chapterPages(mangaId: $id, translationType: $translationType, chapterString: $chapterNum) { edges { pictureUrls pictureUrlHead } } }"
     }
   }
 }
