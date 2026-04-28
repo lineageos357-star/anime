@@ -1,11 +1,28 @@
 {
-  "version": 2,
-  "anime": {
-    "endpoint": "https://api.allanime.day/api",
-    "headers": {
+  "version": 3,
+  "min_app_version": "1.0.0",
+  "endpoints": {
+    "anime": {
+      "primary": "https://api.allanime.day/api",
+      "fallback": "https://api.allanime.day/api"
+    },
+    "manga": {
+      "primary": "https://api.allanime.day/api",
+      "fallback": "https://api.allanime.day/api"
+    }
+  },
+  "headers": {
+    "anime": {
       "Referer": "https://allanime.to",
       "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0"
     },
+    "manga": {
+      "Content-Type": "application/json",
+      "Referer": "https://allmanga.to/",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0"
+    }
+  },
+  "anime": {
     "queries": {
       "search": "query($search: SearchInput $limit: Int $page: Int $translationType: VaildTranslationTypeEnumType $countryOrigin: VaildCountryOriginEnumType) { shows(search: $search limit: $limit page: $page translationType: $translationType countryOrigin: $countryOrigin) { edges { _id name thumbnail banner thumbnails availableEpisodes score type season description status genres broadcastInterval lastEpisodeDate lastEpisodeTimestamp nextAiringEpisode lastEpisodeInfo airedStart } } }",
       "episodeList": "query($showId: String!) { show(_id: $showId) { _id availableEpisodesDetail } }",
@@ -14,11 +31,6 @@
     }
   },
   "allmanga": {
-    "endpoint": "https://api.allanime.day/api",
-    "headers": {
-      "Content-Type": "application/json",
-      "Referer": "https://allmanga.to/"
-    },
     "queries": {
       "search": "query($search: SearchInput, $limit: Int, $page: Int, $translationType: VaildTranslationTypeMangaEnumType, $countryOrigin: VaildCountryOriginEnumType) { mangas(search: $search, limit: $limit, page: $page, translationType: $translationType, countryOrigin: $countryOrigin) { edges { _id name thumbnail englishName countryOfOrigin genres } } }",
       "popular": "query($type: VaildPopularTypeEnumType!, $size: Int!, $dateRange: Int!, $page: Int!, $allowAdult: Boolean!, $allowUnknown: Boolean!) { queryPopular(type: $type, size: $size, dateRange: $dateRange, page: $page, allowAdult: $allowAdult, allowUnknown: $allowUnknown) { recommendations { anyCard { _id name thumbnail englishName } } } }",
