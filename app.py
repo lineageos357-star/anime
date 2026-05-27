@@ -67,26 +67,37 @@ ALLMANGA_REFR = "https://allmanga.to/"
 ALLANIME_REFR = "https://allanime.to/"
 IMAGE_REFR    = "https://youtu-chan.com/"
 
-# Persisted Query SHA-256 hashes (manga side)
-HASH_SEARCH        = "2d48e19fb67ddcac42fbb885204b6abb0a84f406f15ef83f36de4a66f49f651a"
-HASH_MANGA_DETAIL  = "d77781dcf964b97aea0be621dbde430e89e200b58526823ee6010dd11c3ca96a"
-HASH_CHAPTER_PAGES = "a062f1b131dae3d17c1950fad14640d066b988ac10347ed49cfbe70f5e7f661b"
+# Full GQL strings (POST, not persisted)
+MANGA_SEARCH_GQL = (
+    "query($search: SearchInput, $limit: Int, $page: Int, $translationType: VaildTranslationTypeMangaEnumType, $countryOrigin: VaildCountryOriginEnumType) {"
+    "mangas(search: $search, limit: $limit, page: $page, translationType: $translationType, countryOrigin: $countryOrigin) {"
+    "edges { _id name thumbnail countryOfOrigin status genres score description availableChapters } } }"
+)
 
-# Full GQL strings (anime side — POST, not persisted)
+MANGA_DETAIL_GQL = (
+    "query($_id: String!) {"
+    "manga(_id: $_id) { _id name thumbnail countryOfOrigin status genres score description availableChapters } }"
+)
+
+MANGA_CHAPTERS_GQL = (
+    "query ($id: String!, $chapterNumStart: Float!, $chapterNumEnd: Float!) {"
+    "episodeInfos(showId: $id, episodeNumStart: $chapterNumStart, episodeNumEnd: $chapterNumEnd) { episodeIdNum } }"
+)
+
+MANGA_PAGES_GQL = (
+    "query($mangaId: String!, $translationType: VaildTranslationTypeMangaEnumType!, $chapterString: String!) {"
+    "chapterPages(mangaId: $mangaId, translationType: $translationType, chapterString: $chapterString) { edges { pictureUrlHead } } }"
+)
+
 ANIME_SEARCH_GQL = (
-    "query($search:SearchInput$limit:Int$page:Int"
-    "$translationType:VaildTranslationTypeEnumType"
-    "$countryOrigin:VaildCountryOriginEnumType){"
-    "shows(search:$search,limit:$limit,page:$page,"
-    "translationType:$translationType,countryOrigin:$countryOrigin)"
-    "{edges{_id name availableEpisodes{sub dub raw}}}}"
+    "query($search:SearchInput, $limit:Int, $page:Int, $translationType:VaildTranslationTypeEnumType, $countryOrigin:VaildCountryOriginEnumType){"
+    "shows(search:$search,limit:$limit,page:$page,translationType:$translationType,countryOrigin:$countryOrigin)"
+    "{edges{_id name availableEpisodes}}}"
 )
 
 ANIME_EPISODE_GQL = (
-    "query($showId:String!$translationType:VaildTranslationTypeEnumType!"
-    "$episodeString:String!){"
-    "episode(showId:$showId,translationType:$translationType,"
-    "episodeString:$episodeString){episodeString sourceUrls}}"
+    "query($showId:String!, $translationType:VaildTranslationTypeEnumType!, $episodeString:String!){"
+    "episode(showId:$showId,translationType:$translationType,episodeString:$episodeString){episodeString sourceUrls}}"
 )
 
 BROWSER_UA = (
@@ -109,18 +120,11 @@ _session.headers.update({
 # Internal helpers
 # ─────────────────────────────────────────────────────────
 
-def _manga_get(variables: dict, query_hash: str) -> dict:
-    """Persisted Query GET — used for all manga endpoints."""
-    params = {
-        "variables":  json.dumps(variables, separators=(",", ":")),
-        "extensions": json.dumps(
-            {"persistedQuery": {"version": 1, "sha256Hash": query_hash}},
-            separators=(",", ":"),
-        ),
-    }
-    r = _session.get(
+def _manga_post(variables: dict, gql: str) -> dict:
+    """Full-query POST — used for all manga endpoints."""
+    r = _session.post(
         API_ENDPOINT,
-        params=params,
+        json={"variables": variables, "query": gql},
         headers={"Referer": ALLMANGA_REFR},
         timeout=15,
     )
@@ -237,7 +241,7 @@ def manga_search():
         "countryOrigin": country,
     }
 
-    raw   = _manga_get(variables, HASH_SEARCH)
+    raw   = _manga_post(variables, MANGA_SEARCH_GQL)
     edges = (raw.get("data") or {}).get("mangas", {}).get("edges", [])
 
     results = [
@@ -267,26 +271,36 @@ def manga_detail(manga_id: str):
     """
     adult = request.args.get("adult", "false").lower() == "true"
 
+    # Fetch metadata
     variables = {
         "_id": manga_id,
         "search": {"allowAdult": adult, "allowUnknown": False},
     }
-
-    raw   = _manga_get(variables, HASH_MANGA_DETAIL)
+    raw = _manga_post(variables, MANGA_DETAIL_GQL)
     manga = (raw.get("data") or {}).get("manga")
 
     if not manga:
         return _err(f"Manga '{manga_id}' not found.", 404)
 
-    chapters_raw = manga.get("availableChapters", {})
+    # Fetch chapter list via episodeInfos
+    ep_vars = {
+        "id": f"manga@{manga_id}",
+        "chapterNumStart": 0.0,
+        "chapterNumEnd": 9999.0
+    }
+    ep_raw = _manga_post(ep_vars, MANGA_CHAPTERS_GQL)
+    ep_infos = (ep_raw.get("data") or {}).get("episodeInfos", [])
+    
     chapter_list = [
         {
-            "chapter":     ch.get("chapterString"),
-            "title":       ch.get("title"),
-            "upload_date": ch.get("uploadDate"),
+            "chapter": str(int(ch.get("episodeIdNum"))) if ch.get("episodeIdNum") == int(ch.get("episodeIdNum", -1)) else str(ch.get("episodeIdNum")),
+            "title": f"Chapter {ch.get('episodeIdNum')}",
+            "upload_date": None,
         }
-        for ch in manga.get("chapters", [])
+        for ch in ep_infos if ch.get("episodeIdNum") is not None
     ]
+
+    chapters_raw = manga.get("availableChapters", {})
 
     return _ok({
         "id":          manga.get("_id"),
@@ -298,8 +312,8 @@ def manga_detail(manga_id: str):
         "score":       manga.get("score"),
         "description": manga.get("description"),
         "chapters": {
-            "sub": chapters_raw.get("sub", 0),
-            "raw": chapters_raw.get("raw", 0),
+            "sub": chapters_raw.get("sub", 0) if isinstance(chapters_raw, dict) else 0,
+            "raw": chapters_raw.get("raw", 0) if isinstance(chapters_raw, dict) else 0,
         },
         "chapter_list": chapter_list,
     })
@@ -324,7 +338,14 @@ def manga_chapter(manga_id: str, chapter_string: str):
         "offset":          offset,
     }
 
-    raw       = _manga_get(variables, HASH_CHAPTER_PAGES)
+    raw = _manga_post(variables, MANGA_PAGES_GQL)
+    
+    if "errors" in raw:
+        err_msg = raw["errors"][0].get("message", "")
+        if "NEED_CAPTCHA" in err_msg or "countryOfOrigin" in err_msg:
+            return jsonify({"status": "error", "message": "Upstream requires CAPTCHA validation.", "captcha_required": True}), 403
+        return _err(f"Upstream error: {err_msg}", 502)
+
     pages_raw = (raw.get("data") or {}).get("chapterPages", {})
 
     if not pages_raw:
@@ -386,15 +407,20 @@ def anime_search():
     raw   = _anime_post(variables, ANIME_SEARCH_GQL)
     edges = (raw.get("data") or {}).get("shows", {}).get("edges", [])
 
+    def _parse_episodes(ep_field):
+        if isinstance(ep_field, dict):
+            return {
+                "sub": ep_field.get("sub", 0),
+                "dub": ep_field.get("dub", 0),
+                "raw": ep_field.get("raw", 0),
+            }
+        return {"sub": 0, "dub": 0, "raw": 0}
+
     results = [
         {
             "id":   e.get("_id"),
             "name": e.get("name"),
-            "episodes": {
-                "sub": e.get("availableEpisodes", {}).get("sub", 0),
-                "dub": e.get("availableEpisodes", {}).get("dub", 0),
-                "raw": e.get("availableEpisodes", {}).get("raw", 0),
-            },
+            "episodes": _parse_episodes(e.get("availableEpisodes")),
         }
         for e in edges
     ]
@@ -417,7 +443,14 @@ def anime_episode_sources(show_id: str, episode_string: str):
         "episodeString":   episode_string,
     }
 
-    raw     = _anime_post(variables, ANIME_EPISODE_GQL)
+    raw = _anime_post(variables, ANIME_EPISODE_GQL)
+    
+    if "errors" in raw:
+        err_msg = raw["errors"][0].get("message", "")
+        if "NEED_CAPTCHA" in err_msg:
+            return jsonify({"status": "error", "message": "Upstream requires CAPTCHA validation.", "captcha_required": True}), 403
+        return _err(f"Upstream error: {err_msg}", 502)
+
     episode = (raw.get("data") or {}).get("episode")
 
     if not episode:
