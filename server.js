@@ -139,6 +139,14 @@ app.get('/api/parse', (req, res) => {
   res.json({ trend: [], UpcomingAnime: [], slides: [] });
 });
 
+// ------------------------------------------------------------
+// Root endpoint – GET /
+// ------------------------------------------------------------
+app.get('/', (req, res) => {
+  res.send('Anime Scraper API is running! Use /api/search/:query to search.');
+});
+
+
 // because it runs the exported `app` as a serverless function.
 // ------------------------------------------------------------
 const PORT = process.env.PORT || 3000;
