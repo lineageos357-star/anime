@@ -18,7 +18,8 @@ app.get('/search/:query/:page?', async (req, res) => {
   const { query, page = '1' } = req.params;
   try {
     const result = await scraper.search(query, parseInt(page, 10));
-    res.json(result);
+    // Wrap in expected shape
+    res.json({ searchYour: result });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: e.message });
@@ -72,7 +73,8 @@ app.get('/src-server/:id', async (req, res) => {
 app.get('/related/:id', async (req, res) => {
   try {
     const result = await scraper.info(req.params.id);
-    res.json(result);
+    // Expected shape: { infoX: [...] }
+    res.json({ infoX: result });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: e.message });
@@ -80,7 +82,63 @@ app.get('/related/:id', async (req, res) => {
 });
 
 // ------------------------------------------------------------
-// Start the server (used when running locally). Vercel will ignore this
+// Duplicate routes with /api prefix for compatibility
+app.get('/api/search/:query/:page?', async (req, res) => {
+  const { query, page = '1' } = req.params;
+  try {
+    const result = await scraper.search(query, parseInt(page, 10));
+    res.json(result);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/api/episode/:id', async (req, res) => {
+  try {
+    const result = await scraper.episode(req.params.id);
+    res.json(result);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/api/server/:id', async (req, res) => {
+  try {
+    const result = await scraper.servers(req.params.id);
+    res.json(result);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/api/src-server/:id', async (req, res) => {
+  try {
+    const result = await scraper.source(req.params.id);
+    res.json({ restres: result });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/api/related/:id', async (req, res) => {
+  try {
+    const result = await scraper.info(req.params.id);
+    res.json(result);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Dummy parse endpoint providing empty collections for trending, upcoming, slides
+app.get('/api/parse', (req, res) => {
+  res.json({ trend: [], UpcomingAnime: [], slides: [] });
+});
+
 // because it runs the exported `app` as a serverless function.
 // ------------------------------------------------------------
 const PORT = process.env.PORT || 3000;
