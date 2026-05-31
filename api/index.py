@@ -1,23 +1,42 @@
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Security, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from curl_cffi.requests import AsyncSession
+from fastapi.security import APIKeyHeader
 from bs4 import BeautifulSoup
+import cloudscraper
 import re
 import asyncio
+import os
 from typing import Optional
 from .models import SearchResult, MetaResponse, StreamResult, Video, Episode
 from .kwik import extract_stream_url
 
+# ─────────────────────────────────────────────
+# cloudscraper handles Cloudflare / DDoS-Guard
+# automatically — no manual cookie tricks needed.
+# It's sync-only, so we use asyncio.to_thread()
+# to run it without blocking FastAPI's event loop.
+# ─────────────────────────────────────────────
 BASEURL = "https://animepahe.ru"
+scraper = cloudscraper.create_scraper(
+    browser={"browser": "chrome", "platform": "windows", "mobile": False}
+)
 
-# curl_cffi impersonates a real Chrome TLS fingerprint — bypasses DDoS-Guard and Cloudflare
-IMPERSONATE = "chrome120"
+# ─────────────────────────────────────────────
+# Auth — API key via X-API-Key header
+# Set the API_KEY environment variable in Vercel:
+#   vercel env add API_KEY
+# Then pass it in every request:
+#   curl -H "X-API-Key: yourpassword" https://<deployment>/search?q=...
+# ─────────────────────────────────────────────
+api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.5",
-}
+async def require_api_key(key: str = Security(api_key_header)):
+    secret = os.environ.get("API_KEY")
+    if not secret:
+        raise HTTPException(status_code=500, detail="API_KEY env variable not set on server")
+    if key != secret:
+        raise HTTPException(status_code=401, detail="Invalid or missing API key")
+    return key
 
 app = FastAPI(
     title="AnimePahe API",
@@ -33,27 +52,34 @@ app.add_middleware(
 )
 
 
+def scrape_get(url: str, params: dict = None) -> str:
+    """Sync helper — runs in a thread via asyncio.to_thread()."""
+    resp = scraper.get(url, params=params, timeout=20)
+    resp.raise_for_status()
+    return resp.text
+
+def scrape_get_json(url: str, params: dict = None):
+    """Sync helper that returns parsed JSON."""
+    resp = scraper.get(url, params=params, timeout=20)
+    resp.raise_for_status()
+    return resp.json()
+
+
 # ─────────────────────────────────────────────
 # GET /search?q=<title>
 # ─────────────────────────────────────────────
-@app.get("/search", response_model=list[SearchResult], summary="Search for anime by title")
+@app.get("/search", response_model=list[SearchResult], summary="Search for anime by title", dependencies=[Depends(require_api_key)])
 async def search(q: str = Query(..., description="Anime title to search for")):
     """
     Search AnimePahe for an anime by title.
     Returns a list of matches with their session IDs (used for /meta and /streams).
     """
-    async with AsyncSession(impersonate=IMPERSONATE) as session:
-        resp = await session.get(
-            f"{BASEURL}/api",
-            params={"m": "search", "l": 8, "q": q},
-            headers=HEADERS,
-            timeout=15,
+    try:
+        data = await asyncio.to_thread(
+            scrape_get_json, f"{BASEURL}/api", {"m": "search", "l": 8, "q": q}
         )
-
-    if resp.status_code != 200:
-        raise HTTPException(status_code=502, detail=f"AnimePahe returned {resp.status_code}")
-
-    data = resp.json()
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"AnimePahe request failed: {e}")
 
     if not data or "data" not in data:
         return []
@@ -77,33 +103,22 @@ async def search(q: str = Query(..., description="Anime title to search for")):
 # ─────────────────────────────────────────────
 # GET /meta/{session}
 # ─────────────────────────────────────────────
-@app.get("/meta/{session}", response_model=MetaResponse, summary="Get anime metadata + episode list")
+@app.get("/meta/{session}", response_model=MetaResponse, summary="Get anime metadata + episode list", dependencies=[Depends(require_api_key)])
 async def get_meta(session: str):
     """
     Get full metadata and episode list for an anime.
     `session` is the anime session string from /search (without the 'ap' prefix).
     """
-    async with AsyncSession(impersonate=IMPERSONATE) as client:
-        # Both requests share the same session so cookies (incl. any challenge cookies)
-        # are automatically carried across requests
-        page_resp = await client.get(
-            f"{BASEURL}/anime/{session}",
-            headers=HEADERS,
-            timeout=15,
+    try:
+        page_html, ep_data = await asyncio.gather(
+            asyncio.to_thread(scrape_get, f"{BASEURL}/anime/{session}"),
+            asyncio.to_thread(scrape_get_json, f"{BASEURL}/api", {"m": "release", "id": session, "sort": "episode_asc", "page": 1}),
         )
-
-        if page_resp.status_code != 200:
-            raise HTTPException(status_code=404, detail="Anime not found")
-
-        ep_resp = await client.get(
-            f"{BASEURL}/api",
-            params={"m": "release", "id": session, "sort": "episode_asc", "page": 1},
-            headers=HEADERS,
-            timeout=15,
-        )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"AnimePahe request failed: {e}")
 
     # Parse HTML metadata
-    soup = BeautifulSoup(page_resp.text, "html.parser")
+    soup = BeautifulSoup(page_html, "html.parser")
 
     name_el = soup.select_one('span[style="user-select:text"]')
     name = name_el.get_text(strip=True) if name_el else ""
@@ -135,29 +150,20 @@ async def get_meta(session: str):
     duration = find_tag("Duration:")
     genres = [g.get_text(strip=True) for g in soup.select(".anime-genre li")]
 
-    # Parse first page of episodes
-    ep_data = ep_resp.json()
+    # Fetch remaining episode pages in parallel if needed
     last_page = ep_data.get("last_page", 1)
     all_episodes = list(ep_data.get("data", []))
 
-    # Fetch remaining pages in parallel, reusing the same impersonated session
-    # so any cookies from the first request are forwarded automatically
     if last_page > 1:
-        async with AsyncSession(impersonate=IMPERSONATE) as client:
-            tasks = [
-                client.get(
-                    f"{BASEURL}/api",
-                    params={"m": "release", "id": session, "sort": "episode_asc", "page": p},
-                    headers=HEADERS,
-                    timeout=15,
-                )
-                for p in range(2, last_page + 1)
-            ]
-            responses = await asyncio.gather(*tasks)
-
-        for r in responses:
-            page_data = r.json()
-            all_episodes.extend(page_data.get("data", []))
+        extra_pages = await asyncio.gather(*[
+            asyncio.to_thread(
+                scrape_get_json, f"{BASEURL}/api",
+                {"m": "release", "id": session, "sort": "episode_asc", "page": p}
+            )
+            for p in range(2, last_page + 1)
+        ])
+        for page in extra_pages:
+            all_episodes.extend(page.get("data", []))
 
     episodes = [
         Episode(
@@ -171,7 +177,6 @@ async def get_meta(session: str):
         )
         for ep in all_episodes
     ]
-
     episodes.sort(key=lambda e: e.episode)
 
     return MetaResponse(
@@ -191,24 +196,21 @@ async def get_meta(session: str):
 # ─────────────────────────────────────────────
 # GET /streams/{anime_session}/{episode_session}
 # ─────────────────────────────────────────────
-@app.get("/streams/{anime_session}/{episode_session}", response_model=list[StreamResult], summary="Resolve stream URLs for an episode")
+@app.get("/streams/{anime_session}/{episode_session}", response_model=list[StreamResult], summary="Resolve stream URLs for an episode", dependencies=[Depends(require_api_key)])
 async def get_streams(anime_session: str, episode_session: str):
     """
     Resolve playable HLS stream URLs for a specific episode.
     Both `anime_session` and `episode_session` come from the /meta endpoint.
     Returns streams sorted highest quality first.
     """
-    async with AsyncSession(impersonate=IMPERSONATE) as client:
-        resp = await client.get(
-            f"{BASEURL}/play/{anime_session}/{episode_session}",
-            headers=HEADERS,
-            timeout=15,
+    try:
+        html = await asyncio.to_thread(
+            scrape_get, f"{BASEURL}/play/{anime_session}/{episode_session}"
         )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"AnimePahe request failed: {e}")
 
-    if resp.status_code != 200:
-        raise HTTPException(status_code=404, detail="Episode not found")
-
-    soup = BeautifulSoup(resp.text, "html.parser")
+    soup = BeautifulSoup(html, "html.parser")
     buttons = soup.select("div#resolutionMenu > button")
 
     if not buttons:
